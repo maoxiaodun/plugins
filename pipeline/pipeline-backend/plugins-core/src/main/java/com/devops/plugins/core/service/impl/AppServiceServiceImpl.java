@@ -181,6 +181,8 @@ public class AppServiceServiceImpl extends ServiceImpl<AppServiceMapper, AppServ
 
     @Override
     public boolean update(AppServiceUpdateReq appServiceUpdateReq) {
+        appServiceUpdateReq.setPipelineType(PlatFormConstraint.PIPELINE_TYPE_CUSTOM);
+
         AppServiceEntity appServiceEntity = new AppServiceEntity();
         appServiceEntity.setId(appServiceUpdateReq.getId());
         appServiceEntity.setName(appServiceUpdateReq.getName());
@@ -271,24 +273,15 @@ public class AppServiceServiceImpl extends ServiceImpl<AppServiceMapper, AppServ
             List<CustomPipelineRelationEntity> relationEntities = customPipelineRelationMapper.selectList(customPipelineRelationEntityQueryWrapper);
             if (CollectionUtils.isNotEmpty(relationEntities)) {
                 if (!relationEntities.get(0).getPipelineId().equals(appServiceUpdateReq.getPipelineId())) {
-                    saveOrUpdateRepositoryFileAndEnvs(oldAppServiceEntity.getId(), yaml, ".gitlab-ci.yml", new ArrayList<>());
+                    LambdaQueryWrapper<CustomPipelineEnvsEntity> customPipelineEnvsEntityLambdaQueryWrapper = new LambdaQueryWrapper<>();
+                    customPipelineEnvsEntityLambdaQueryWrapper.eq(CustomPipelineEnvsEntity::getPipelineId, appServiceUpdateReq.getPipelineId());
+                    List<CustomPipelineEnvsEntity> customPipelineEnvsEntities = customPipelineEnvsMapper.selectList(customPipelineEnvsEntityLambdaQueryWrapper);
+
+                    saveOrUpdateRepositoryFileAndEnvs(oldAppServiceEntity.getId(), yaml, ".gitlab-ci.yml", customPipelineEnvsEntities);
                     CustomPipelineRelationEntity customPipelineRelationEntity = relationEntities.get(0);
                     customPipelineRelationEntity.setPipelineId(appServiceUpdateReq.getPipelineId());
                     customPipelineRelationMapper.updateByPrimaryKeySelective(customPipelineRelationEntity);
                 }
-            } else {
-                //内置流水线切换为自定义流水线，更新Dockerfile和.gitlab-ci.yml
-                CustomPipelineRelationEntity customPipelineRelationEntity = new CustomPipelineRelationEntity();
-                customPipelineRelationEntity.setId(UUID.randomUUID().toString().replace("-", ""));
-                customPipelineRelationEntity.setPipelineId(appServiceUpdateReq.getPipelineId());
-                customPipelineRelationEntity.setAppServiceId(oldAppServiceEntity.getId());
-                try (InputStream inputStream = AppServiceServiceImpl.class.getClassLoader().getResourceAsStream("application/" + oldType + "/Dockerfile")) {
-                    saveOrUpdateRepositoryFileAndEnvs( oldAppServiceEntity.getId(), FileUtil.replaceReturnString(inputStream, new HashMap<>()), "Dockerfile", null);
-                } catch (Exception e) {
-                    throw new BusinessRuntimeException("Dockerfile文件未找到");
-                }
-                saveOrUpdateRepositoryFileAndEnvs(oldAppServiceEntity.getId(), yaml, ".gitlab-ci.yml", null);
-                customPipelineRelationMapper.insert(customPipelineRelationEntity);
             }
         }
         return SqlHelper.retBool(appServiceMapper.updateByPrimaryKeySelective(appServiceEntity));
@@ -367,7 +360,7 @@ public class AppServiceServiceImpl extends ServiceImpl<AppServiceMapper, AppServ
         //移除了一些界面配置，初始化值
         appServiceAddReq.setPipelineType(PlatFormConstraint.PIPELINE_TYPE_CUSTOM);
         appServiceAddReq.setServiceType(PlatFormConstraint.SERVICE_TYPE_EXTERNAL);
-        if(appServiceAddReq.getType().equals("true")) {
+        if(PlatFormConstraint.TRUE.equals(appServiceAddReq.getType())) {
             appServiceAddReq.setType(PlatFormConstraint.AppService_Template_Microservice);
         } else{
             appServiceAddReq.setType(PlatFormConstraint.OTHER);
